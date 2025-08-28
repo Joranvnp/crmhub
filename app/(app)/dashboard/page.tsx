@@ -1,5 +1,3 @@
-import ButtonAccount from "@/components/ButtonAccount";
-
 import { createClient } from "@/libs/supabase/server";
 import { ALL_MODULES } from "@/libs/modules";
 import Link from "next/link";

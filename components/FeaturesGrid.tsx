@@ -1,6 +1,4 @@
 /* eslint-disable @next/next/no-img-element */
-import React from "react";
-
 const features = [
   {
     title: "Collect user feedback",

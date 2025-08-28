@@ -3,8 +3,6 @@
 import { Dialog, Transition } from "@headlessui/react";
 import { Fragment } from "react";
 
-import React from "react";
-
 interface ModalProps {
   isModalOpen: boolean;
   setIsModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
