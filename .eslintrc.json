@@ -7,6 +7,12 @@
   },
   "rules": {
     // Your specific rules.
+    "no-undef": "off",
     "no-unused-vars": "warn"
+  },
+  "settings": {
+    "react": {
+      "version": "detect"
+    }
   }
 }
