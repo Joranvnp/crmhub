@@ -1,6 +1,7 @@
 import Image from "next/image";
 import TestimonialsAvatars from "./TestimonialsAvatars";
 import config from "@/config";
+import ButtonLead from "@/components/ButtonLead";
 
 const Hero = () => {
   return (
@@ -28,9 +29,12 @@ const Hero = () => {
           The NextJS boilerplate with all you need to build your SaaS, AI tool,
           or any other web app. From idea to production in 5 minutes.
         </p>
-        <button className="btn btn-primary btn-wide">
+        {/* <button className="btn btn-primary btn-wide">
           Get {config.appName}
-        </button>
+        </button> */}
+
+        {/* For the Hero & CTA use this 👇 */}
+        <ButtonLead />
 
         <TestimonialsAvatars priority={true} />
       </div>

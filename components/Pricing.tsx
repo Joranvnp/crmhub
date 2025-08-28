@@ -1,5 +1,6 @@
 import config from "@/config";
 import ButtonCheckout from "./ButtonCheckout";
+import ButtonLead from "@/components/ButtonLead";
 
 // <Pricing/> displays the pricing plans for your app
 // It's your Stripe config in config.js.stripe.plans[] that will be used to display the plans
@@ -89,7 +90,10 @@ const Pricing = () => {
                   </ul>
                 )}
                 <div className="space-y-2">
-                  <ButtonCheckout priceId={plan.priceId} />
+                  {/* <ButtonCheckout priceId={plan.priceId} /> */}
+
+                  {/* For the Pricing use this instead 👇 */}
+                  <ButtonLead extraStyle="!max-w-none !w-full" />
 
                   <p className="flex items-center justify-center gap-2 text-sm text-center text-base-content/80 font-medium relative">
                     Pay once. Access forever.
