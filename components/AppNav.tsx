@@ -19,7 +19,7 @@ export default function AppNav() {
       <div className="max-w-6xl mx-auto flex items-center justify-between px-4 h-14">
         {/* Logo */}
         <Link href="/dashboard" className="font-bold text-lg">
-          CRM Hub
+          Strato
         </Link>
 
         {/* Desktop nav */}
