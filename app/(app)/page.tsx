@@ -1,3 +1,5 @@
-export default function HomePage() {
-  return <main>Bienvenue</main>;
+import { ReactNode } from "react";
+
+export default function AppGroupPage(): ReactNode {
+  return null;
 }
