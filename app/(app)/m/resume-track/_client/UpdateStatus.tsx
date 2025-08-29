@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import apiClient from "@/libs/api";
+import React from "react";
 
 const STATUSES = ["applied", "interview", "offer", "rejected"];
 

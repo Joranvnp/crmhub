@@ -1,4 +1,5 @@
 import AppNav from "@/components/AppNav";
+import React from "react";
 
 export default function AppAreaLayout({
   children,

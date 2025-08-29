@@ -1,6 +1,7 @@
 import config from "@/config";
 import ButtonCheckout from "./ButtonCheckout";
 import ButtonLead from "@/components/ButtonLead";
+import React from "react";
 
 // <Pricing/> displays the pricing plans for your app
 // It's your Stripe config in config.js.stripe.plans[] that will be used to display the plans
