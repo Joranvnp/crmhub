@@ -73,13 +73,8 @@ const ClientLayout = ({ children }: { children: ReactNode }) => {
       {/* Show a progress bar at the top when navigating between pages */}
       <NextTopLoader color={config.colors.main} showSpinner={false} />
 
-      <div className="min-h-screen bg-gray-50">
-        <AppNav />
-        <main className="max-w-6xl mx-auto px-6 py-8">
-          {/* Content inside app/page.js files  */}
-          {children}
-        </main>
-      </div>
+      {/* Content inside app/page.js files  */}
+      {children}
 
       {/* Show Success/Error messages anywhere from the app with toast() */}
       <Toaster
