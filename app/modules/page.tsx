@@ -6,11 +6,12 @@ import { toggleModule } from "./actions";
 export const dynamic = "force-dynamic";
 
 export default async function ModulesPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
+
   const {
     data: { user },
-  } = await (await supabase).auth.getUser();
-  if (!user)
+  } = await supabase.auth.getUser();
+  if (!user) {
     return (
       <main className="p-8">
         Non connecté.{" "}
@@ -19,8 +20,9 @@ export default async function ModulesPage() {
         </Link>
       </main>
     );
+  }
 
-  const { data: rows } = await (await supabase)
+  const { data: rows } = await supabase
     .from("modules_enabled")
     .select("module_slug, enabled")
     .eq("user_id", user.id);
