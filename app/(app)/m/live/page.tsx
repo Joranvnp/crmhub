@@ -30,20 +30,6 @@ export default async function LivePage() {
 
   return (
     <main className="space-y-6">
-      {/* Sous-menu interne */}
-      <nav className="flex items-center gap-3">
-        <span className="font-semibold">Live</span>
-        <Link href="/m/live" className="text-sm underline">
-          Liens
-        </Link>
-        <Link href="/m/live/player" className="text-sm underline">
-          Player
-        </Link>
-        <Link href="/m/live/snippet" className="text-sm underline">
-          Snippet console
-        </Link>
-      </nav>
-
       {/* Ajouter un lien */}
       <section className="border rounded-xl bg-white p-6 shadow-sm">
         <h1 className="text-xl font-semibold mb-3">Ajouter un lien</h1>
