@@ -156,4 +156,10 @@ export const ALL_MODULES: ModuleItem[] = [
     category: "prod",
     description: "Suivi de candidatures",
   },
+  {
+    slug: "live",
+    name: "Live Monitor",
+    category: "prod",
+    description: "Détecte si un live est en cours et récupère le .m3u8",
+  },
 ];
