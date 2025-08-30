@@ -178,6 +178,110 @@ const sniff8s = `(() => {
   }, 8000);
 })();`;
 
+/** 5) NEW — Analyse qualité (master) : sélectionne/upgrade vers un master et copie le meilleur */
+const qualityMasterPicker = `(async () => { 
+  const seen = new Set();
+  const looks = u => typeof u === 'string' && /\\.m3u8(\\?|#|$)/i.test(u);
+  const add   = u => { if (looks(u)) seen.add(String(u)); };
+
+  // 1) collecte rapide
+  try { performance.getEntriesByType('resource').forEach(e => add(e.name)); } catch {}
+  document.querySelectorAll('video').forEach(v => { add(v.src); add(v.currentSrc); });
+
+  // si tu as déjà des URLs copiées, colle-les ici (optionnel) :
+  // ["https://...chunklist.m3u8", "https://...playlist.m3u8"].forEach(add);
+
+  const uniq = [...seen];
+
+  // helpers
+  const deriveMasters = (u) => {
+    const s = new Set([u,
+      u.replace(/chunklist[^/]*\\.m3u8/i, "playlist.m3u8"),
+      u.replace(/chunklist[^/]*\\.m3u8/i, "master.m3u8"),
+      u.replace(/index[^/]*\\.m3u8/i,    "playlist.m3u8"),
+      u.replace(/index[^/]*\\.m3u8/i,    "master.m3u8"),
+    ]);
+    return [...s].filter(x => /\\.m3u8(\\?|#|$)/i.test(x));
+  };
+
+  const fetchText = async (u) => {
+    try {
+      const r = await fetch(u, { headers: { accept: "application/vnd.apple.mpegurl,*/*;q=0.8" }, cache: "no-store" });
+      if (!r.ok) return null;
+      return await r.text();
+    } catch { return null; }
+  };
+
+  const parseMaster = (txt) => {
+    // retourne la meilleure variante (max height / bandwidth)
+    const lines = txt.split(/\\r?\\n/);
+    const out = [];
+    for (let i=0;i<lines.length;i++){
+      const L = lines[i];
+      if (/^#EXT-X-STREAM-INF:/i.test(L)) {
+        const bw = /BANDWIDTH=(\\d+)/i.exec(L)?.[1];
+        const res = /RESOLUTION=(\\d+)x(\\d+)/i.exec(L);
+        const name = /NAME="([^"]+)"/i.exec(L)?.[1] || null;
+        const u = lines[i+1] && !lines[i+1].startsWith("#") ? lines[i+1].trim() : null;
+        out.push({
+          bandwidth: bw ? parseInt(bw,10) : 0,
+          height: res ? parseInt(res[2],10) : 0,
+          name, uri: u
+        });
+      }
+    }
+    out.sort((a,b)=> (b.height - a.height) || (b.bandwidth - a.bandwidth));
+    return { levels: out, best: out[0] || null };
+  };
+
+  const analyze = async (u) => {
+    const txt = await fetchText(u);
+    if (!txt) return { url: u, type: "unreachable" };
+    const isMaster = /#EXT-X-STREAM-INF/i.test(txt);
+    if (isMaster) {
+      const m = parseMaster(txt);
+      return {
+        url: u, type: "master",
+        bestHeight: m.best?.height || 0,
+        bestBandwidth: m.best?.bandwidth || 0,
+        levels: m.levels.length
+      };
+    }
+    // chunklist → tente de dériver un master voisin
+    for (const cand of deriveMasters(u)) {
+      if (cand === u) continue;
+      const t2 = await fetchText(cand);
+      if (t2 && /#EXT-X-STREAM-INF/i.test(t2)) {
+        const m = parseMaster(t2);
+        return {
+          url: cand, note: "(dérivé de chunklist)",
+          type: "master",
+          bestHeight: m.best?.height || 0,
+          bestBandwidth: m.best?.bandwidth || 0,
+          levels: m.levels.length
+        };
+      }
+    }
+    return { url: u, type: "chunklist" };
+  };
+
+  const results = await Promise.all(uniq.map(analyze));
+  results.sort((a,b)=>{
+    const rank = (r) => r.type==="master" ? (r.bestHeight||0)*1e9 + (r.bestBandwidth||0) : (r.type==="chunklist"? 1 : 0);
+    return rank(b) - rank(a);
+  });
+
+  console.table(results);
+  const best = results.find(r => r.type==="master") || results[0];
+  if (best && best.url) {
+    try { await navigator.clipboard.writeText(best.url); } catch {}
+    console.log("✅ Meilleur HLS :", best.url);
+    alert("✅ Meilleur HLS :\\n" + best.url);
+  } else {
+    alert("❓ Pas de master détecté (utilise le menu qualité du player si possible).");
+  }
+})();`;
+
 export default function SnippetPage() {
   return (
     <main className="max-w-3xl mx-auto p-6 space-y-6">
@@ -208,6 +312,10 @@ export default function SnippetPage() {
       <CodeBlock
         title="Sniff .m3u8 (8s) — copie le meilleur lien"
         code={sniff8s}
+      />
+      <CodeBlock
+        title="Analyse qualité (master) — copie le meilleur HLS"
+        code={qualityMasterPicker}
       />
 
       <div className="text-xs text-gray-500">

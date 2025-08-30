@@ -67,19 +67,76 @@ export default function LivePlayerPage() {
     setErrorMsg(null);
 
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
+      const hls = new Hls({
+        enableWorker: true,
+        // ↓ Réglages anti-stall
+        lowLatencyMode: false, // laisse en "false" si flux non LL-HLS
+        capLevelToPlayerSize: true, // évite de prendre trop gros
+        startLevel: -1, // laisse ABR auto
+        backBufferLength: 30,
+        maxBufferLength: 15, // buffer "target" plus court
+        maxMaxBufferLength: 60,
+        maxBufferHole: 0.5,
+        liveSyncDuration: 3,
+        liveMaxLatencyDuration: 10,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 5,
+        // ABR un peu prudente
+        abrEwmaDefaultEstimate: 3000000, // 3 Mbps par défaut
+        abrBandWidthFactor: 0.8,
+        abrBandWidthUpFactor: 0.7,
+      });
+
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data?.details === "manifestLoadError") {
-          setErrorMsg(
-            "Impossible de charger le manifeste HLS (CORS/anti-bot ?). " +
-              "Si la source est YouTube/Twitch/Vimeo, utilise l'embed officiel."
-          );
-        } else {
-          setErrorMsg("Erreur HLS : " + (data?.details || "inconnue"));
+        // Log utile en dev
+        console.debug("[HLS][ERROR]", data);
+
+        // Non fatal : gérer buffer stall doucement
+        if (!data.fatal) {
+          const d = (data as any).details || data.details;
+          if (
+            d === "bufferStalledError" ||
+            d === Hls.ErrorDetails?.BUFFER_STALLED_ERROR
+          ) {
+            // petit coup de pouce au currentTime
+            try {
+              if (video.readyState > 0) {
+                const t = video.currentTime;
+                video.currentTime = Math.max(0, t - 0.001);
+              }
+            } catch {}
+          }
+          return;
+        }
+
+        // Fatal : stratégie de recovery
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            hls.startLoad(); // relance le chargement
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            hls.recoverMediaError();
+            break;
+          default:
+            hls.destroy();
+            setErrorMsg("Erreur HLS fatale.");
+            break;
         }
       });
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        // démarrage lecture si possible
+        video.play().catch(() => {});
+      });
+
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_e, d) => {
+        // si besoin, tu peux logger le niveau courant
+        // console.debug('[HLS] level ->', d.level);
+      });
+
       hls.loadSource(src);
       hls.attachMedia(video);
+
       return () => hls.destroy();
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       // Safari natif

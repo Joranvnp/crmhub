@@ -1,7 +1,8 @@
 "use client";
+
 import { useState } from "react";
 
-const ATTACH_URL = "/api/modules/live/attach";
+const ATTACH_URL = "/api/modules/live/attach"; // <-- slash initial
 
 async function safeJson(res: Response) {
   const ct = res.headers.get("content-type") || "";
@@ -20,6 +21,7 @@ export default function AttachM3U8Button({ id }: { id: string }) {
   async function onClick() {
     setLoading(true);
     try {
+      // préremplir avec le presse-papiers si possible
       let clip = "";
       try {
         clip = await navigator.clipboard.readText();
@@ -37,13 +39,15 @@ export default function AttachM3U8Button({ id }: { id: string }) {
       if (!res.ok) {
         alert(
           `Erreur attach (${res.status}): ${
-            data?.error || data?._raw || "unknown"
+            (data as any)?.error || (data as any)?._raw || "unknown"
           }`
         );
         console.error("[attach]", res.status, data);
         return;
       }
+
       alert("Attach OK ✅");
+      // rafraîchir la page/liste
       location.reload();
     } finally {
       setLoading(false);

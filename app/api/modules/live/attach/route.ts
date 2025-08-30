@@ -3,21 +3,29 @@ import { createClient } from "@/libs/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-// GET pour tester rapidement que la route est bien joignable
-export async function GET() {
-  return NextResponse.json({ ok: true, route: "/api/modules/live/attach" });
-}
-
 function isM3U8(u: string) {
   return /\.m3u8(\?|#|$)/i.test(u);
 }
 function normalize(raw: string) {
   const s = (raw || "").trim();
-  const u = new URL(s);
-  if (!/^https?:$/.test(u.protocol)) throw new Error("invalid_protocol");
-  if (!isM3U8(u.pathname + u.search + u.hash)) throw new Error("not_m3u8");
-  if (u.toString().length > 2048) throw new Error("url_too_long");
-  return u.toString();
+  let url: URL;
+  try {
+    url = new URL(s);
+  } catch {
+    throw new Error("invalid_url");
+  }
+  if (!/^https?:$/.test(url.protocol)) throw new Error("invalid_protocol");
+  if (!isM3U8(url.pathname + url.search + url.hash))
+    throw new Error("not_m3u8");
+  const str = url.toString();
+  if (str.length > 2048) throw new Error("url_too_long");
+  return str;
+}
+
+// Small healthcheck to debug 404s quickly:
+// go to http://localhost:3000/api/modules/live/attach in your browser.
+export async function GET() {
+  return NextResponse.json({ ok: true, route: "/api/modules/live/attach" });
 }
 
 export async function POST(req: Request) {
@@ -26,8 +34,9 @@ export async function POST(req: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user)
+    if (!user) {
       return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+    }
 
     let body: any;
     try {
@@ -55,28 +64,26 @@ export async function POST(req: Request) {
       );
     }
 
-    // Vérifier ownership
-    const { data: link, error: findErr } = await supabase
+    // Check ownership
+    const { data: link, error: selErr } = await supabase
       .from("live_links")
-      .select("id,user_id,last_m3u8,status") // minimal; ajoute 'provider' si tu as la colonne
+      .select("id,user_id,provider")
       .eq("id", id)
       .eq("user_id", user.id)
-      .maybeSingle();
+      .single();
 
-    if (findErr || !link) {
+    if (selErr || !link) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
 
-    // Patch minimal compatible avec ta CHECK(status)
-    const patch: Record<string, any> = {
+    const patch = {
       last_m3u8: m3u8,
-      status: "online", // autorisé par ta contrainte
+      provider: link.provider || "raw_hls",
+      status: "online" as const,
+      last_probe_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      last_error_code: null as string | null,
     };
-    // Si tu as ces colonnes, décommente :
-    // patch.provider = "raw_hls";
-    // patch.last_probe_at = new Date().toISOString();
-    // patch.last_checked_at = new Date().toISOString();
-    // patch.last_error_code = null;
 
     const { data: updated, error: upErr } = await supabase
       .from("live_links")
@@ -84,14 +91,11 @@ export async function POST(req: Request) {
       .eq("id", id)
       .eq("user_id", user.id)
       .select("*")
-      .maybeSingle();
+      .single();
 
-    if (upErr || !updated) {
+    if (upErr) {
       return NextResponse.json(
-        {
-          error: "db_update_failed",
-          detail: upErr?.message || "no_row_updated",
-        },
+        { error: "db_update_failed", detail: upErr.message },
         { status: 500 }
       );
     }
@@ -99,7 +103,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ data: updated }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json(
-      { error: "server_error", detail: String(e?.message || e) },
+      { error: "server_error", detail: e?.message || String(e) },
       { status: 500 }
     );
   }
