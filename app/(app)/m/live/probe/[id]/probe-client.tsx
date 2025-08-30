@@ -20,7 +20,7 @@ export default function ProbeClient({
     const base =
       (appUrl && appUrl.trim()) ||
       (typeof window !== "undefined" ? window.location.origin : "");
-    return `${base.replace(/\/$/, "")}/api/live/probe-collect`;
+    return `${base.replace(/\/$/, "")}/api/modules/live/probe-collect`;
   }, [appUrl]);
 
   // Bookmarklet One-shot (8s sniff)

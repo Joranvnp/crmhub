@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/libs/supabase/server";
 import { addLink, deleteLink, checkLink } from "./actions";
+import AttachM3U8Button from "@/app/(app)/m/live/_components/AttachM3U8Button";
+import VerifyButton from "@/app/(app)/m/live/_components/VerifyButton";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +24,7 @@ export default async function LivePage() {
 
   const { data: rows } = await supabase
     .from("live_links")
-    .select("*")
+    .select("id, url, title, status, last_m3u8, last_checked_at, probe_token")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -127,7 +129,7 @@ export default async function LivePage() {
               )}
 
               <div className="flex items-center gap-3">
-                <form action={checkLink}>
+                {/* <form action={checkLink}>
                   <input type="hidden" name="id" value={r.id} />
                   <input type="hidden" name="url" value={r.url} />
                   <button className="px-3 py-1 rounded border">Vérifier</button>
@@ -137,7 +139,15 @@ export default async function LivePage() {
                   >
                     Probe (client)
                   </Link>
-                </form>
+                </form> */}
+
+                <VerifyButton
+                  id={r.id}
+                  url={r.url}
+                  probeToken={r.probe_token}
+                />
+
+                <AttachM3U8Button id={r.id} />
 
                 <form action={deleteLink}>
                   <input type="hidden" name="id" value={r.id} />

@@ -1,6 +1,37 @@
-export default function SnippetPage() {
-  const watcherAll = `
-(function(){
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+
+function CodeBlock({ title, code }: { title: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {}
+  }
+  return (
+    <section className="space-y-2 border rounded-xl bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">{title}</h3>
+        <button
+          onClick={copy}
+          className="px-3 py-1 text-sm rounded bg-black text-white"
+        >
+          {copied ? "Copié ✔" : "Copier"}
+        </button>
+      </div>
+      <pre className="p-4 bg-slate-900 text-slate-100 text-xs rounded overflow-auto">
+        <code>{code}</code>
+      </pre>
+    </section>
+  );
+}
+
+/** 1) Watcher global (fetch/xhr/video/Hls.js) */
+const watcherAll = `(function(){
   const log = (u, how) => { try { console.log("[M3U8]["+how+"]", u); } catch {} };
 
   // fetch
@@ -52,11 +83,10 @@ export default function SnippetPage() {
   })();
 
   console.log("%cM3U8 watcher actif. Navigue/clique Play et surveille la console.", "color: green");
-})();`.trim();
+})();`;
 
-  // (2) Ton snippet "video + performance" rapide
-  const quickVideoAndPerf = `
-document.querySelectorAll('video').forEach((v, i) => {
+/** 2) Inspection rapide vidéo + perf */
+const quickVideoAndPerf = `document.querySelectorAll('video').forEach((v, i) => {
   console.log('Video', i+1, ':', {
     src: v.src,
     currentSrc: v.currentSrc,
@@ -68,11 +98,10 @@ document.querySelectorAll('video').forEach((v, i) => {
 console.log('Requêtes avec "stream" ou "m3u8":');
 performance.getEntriesByType('resource')
   .filter(r => r.name.includes('stream') || r.name.includes('m3u8'))
-  .forEach(r => console.log(r.name));`.trim();
+  .forEach(r => console.log(r.name));`;
 
-  // (3) Ton snippet "scan + copy" instantané
-  const perfScanAndCopy = `
-(() => {
+/** 3) Scan perf instantané + copie 1ère .m3u8 */
+const perfScanAndCopy = `(() => {
   const re = /\\.m3u8(\\?|$)|stream/i;
   const urls = Array.from(new Set(
     performance.getEntriesByType('resource')
@@ -86,136 +115,104 @@ performance.getEntriesByType('resource')
   const first = urls.find(u => /\\.m3u8(\\?|$)/i.test(u));
   if (first) {
     console.log('Première .m3u8:', first);
-    try { copy(first); console.log('→ Copié dans le presse-papiers'); } catch {}
+    try { navigator.clipboard.writeText(first); console.log('→ Copié dans le presse-papiers'); } catch {}
   } else {
     console.log('Aucune .m3u8 actuelle (essaie le watcher ou clique Play).');
   }
-})();`.trim();
+})();`;
 
-  // (4) NOUVEAU : Watcher "live" par PerformanceObserver (capte dès qu'une ressource arrive)
-  const perfObserverLive = `
-(() => {
-  const re = /\\.m3u8(\\?|$)/i;
-  const seen = new Set();
+/** 4) Sniff .m3u8 (8s) — version qui copie le meilleur lien */
+const sniff8s = `(() => {
+  const found = new Set();
+  const looks = u => typeof u === 'string' && /\\.m3u8(\\?|$)/i.test(u) && !/jpeg\\.live\\.mmcdn\\.com/i.test(u);
+  const add   = u => { try { if (looks(u)) found.add(String(u)); } catch {} };
 
-  // 1) prendre déjà ce qui existe
-  performance.getEntriesByType('resource')
-    .map(e => e && e.name)
-    .filter(Boolean)
-    .forEach(u => { if (re.test(u) && !seen.has(u)) { seen.add(u); console.log('[M3U8][perf-scan]', u); } });
+  // 1) Ressources déjà chargées
+  try { performance.getEntriesByType('resource').forEach(e => add(e.name)); } catch {}
 
-  // 2) observer les nouvelles entrées en temps réel
-  if ('PerformanceObserver' in window) {
-    const obs = new PerformanceObserver((list) => {
-      for (const e of list.getEntries()) {
-        const u = e && e.name;
-        if (u && re.test(u) && !seen.has(u)) {
-          seen.add(u);
-          console.log('[M3U8][perf-observer]', u);
-          try { copy(u); console.log('→ Copié'); } catch {}
-        }
-      }
+  // 2) Patch fetch / XHR pour 8s
+  const _fetch = window.fetch;
+  try { window.fetch = function (...a) { const u = a[0]; add(typeof u==='string' ? u : (u && u.url)); return _fetch.apply(this, a); }; } catch {}
+  const _open = XMLHttpRequest.prototype.open;
+  try { XMLHttpRequest.prototype.open = function (m, u) { add(u); return _open.apply(this, arguments); }; } catch {}
+
+  // 3) Petit overlay
+  try {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;z-index:2147483647;bottom:12px;right:12px;background:#111;color:#fff;padding:10px 12px;border-radius:10px;font:12px/1.3 system-ui';
+    box.textContent = 'Sniff .m3u8 en cours (8s). Clique ▶️ si besoin…';
+    document.body.appendChild(box);
+    setTimeout(() => box.remove(), 9000);
+  } catch {}
+
+  // 4) Score/pick
+  const pick = () => {
+    const arr = [...found];
+    if (!arr.length) return null;
+    arr.sort((a, b) => {
+      const score = u => {
+        let s = 0;
+        if (/playlist\\.m3u8/i.test(u)) s += 3;
+        if (/master\\.m3u8/i.test(u))   s += 2;
+        if (/chunklist|index\\.m3u8/i.test(u)) s += 1;
+        if (/^https?:\\/\\//i.test(u))   s += 1;
+        return -s;
+      };
+      return score(a) - score(b);
     });
-    try {
-      obs.observe({ type: 'resource', buffered: true });
-      console.log('%cPerformanceObserver actif (resource).', 'color: green');
-      // stocker globalement pour pouvoir l'arrêter
-      (window as any).__m3u8PerfObs = obs;
-    } catch (err) {
-      console.warn('PerformanceObserver error:', err);
+    return arr[0];
+  };
+
+  setTimeout(async () => {
+    try { window.fetch = _fetch; } catch {}
+    try { XMLHttpRequest.prototype.open = _open; } catch {}
+
+    const best = pick();
+    if (best) {
+      console.log('✅ BEST M3U8:', best);
+      try { await navigator.clipboard.writeText(best); console.log('📋 Copié'); } catch {}
+      alert('✅ Flux capturé (copié) :\\n' + best);
+    } else {
+      alert('❓ Pas de .m3u8 vu. Relance Play, change la qualité, puis réessaie.');
     }
-  } else {
-    console.warn('PerformanceObserver non supporté.');
-  }
-})();`.trim();
+  }, 8000);
+})();`;
 
-  // (5) NOUVEAU : Arrêter le watcher (si besoin)
-  const perfObserverStop = `
-(() => {
-  const obs = (window as any).__m3u8PerfObs;
-  if (obs && obs.disconnect) {
-    obs.disconnect();
-    console.log('PerformanceObserver arrêté.');
-    (window as any).__m3u8PerfObs = null;
-  } else {
-    console.log('Aucun PerformanceObserver actif.');
-  }
-})();`.trim();
-
+export default function SnippetPage() {
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-8">
-      <h1 className="text-2xl font-semibold">
-        Snippets console · .m3u8 (Performance)
-      </h1>
+    <main className="max-w-3xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Snippets console · .m3u8</h1>
+        <Link href="/m/live" className="underline">
+          ← Retour
+        </Link>
+      </div>
+
       <p className="text-gray-700">
-        Ouvre le site cible dans <b>ton navigateur</b>, lance la vidéo si
-        besoin, puis colle un des snippets ci-dessous dans la console (F12). Ces
-        scripts ne font que <i>lister les ressources</i> que la page charge
-        (aucun contournement).
+        Ouvre la page du live, clique <b>Play</b> si besoin, puis colle un des
+        snippets dans la console (F12).
       </p>
 
-      {/* 1) Watcher complet (fetch/xhr/video/hls.js) */}
-      <section className="space-y-2">
-        <h2 className="font-semibold">
-          1) Watcher global (fetch / XHR / &lt;video&gt; / Hls.js)
-        </h2>
-        <p className="text-sm text-gray-600">
-          Capture les .m3u8 déclenchés pendant que tu navigues/cliques “Play”.
-        </p>
-        <pre className="p-4 bg-slate-900 text-slate-100 text-xs rounded overflow-auto">
-          {watcherAll}
-        </pre>
-      </section>
-
-      {/* 2) Inspection rapide vidéo + perf */}
-      <section className="space-y-2">
-        <h2 className="font-semibold">
-          2) Inspection rapide (balises &lt;video&gt; + Performance)
-        </h2>
-        <pre className="p-4 bg-slate-900 text-slate-100 text-xs rounded overflow-auto">
-          {quickVideoAndPerf}
-        </pre>
-      </section>
-
-      {/* 3) Scan perf instantané (one-shot) */}
-      <section className="space-y-2">
-        <h2 className="font-semibold">
-          3) Scan Performance (instantané) + copie 1ère .m3u8
-        </h2>
-        <pre className="p-4 bg-slate-900 text-slate-100 text-xs rounded overflow-auto">
-          {perfScanAndCopy}
-        </pre>
-      </section>
-
-      {/* 4) Watcher perf live */}
-      <section className="space-y-2">
-        <h2 className="font-semibold">4) PerformanceObserver (live)</h2>
-        <p className="text-sm text-gray-600">
-          Observe en temps réel les nouvelles ressources réseau, loggue et copie
-          chaque <code>.m3u8</code> détectée. Relance la vidéo ou navigue dans
-          la page si nécessaire.
-        </p>
-        <pre className="p-4 bg-slate-900 text-slate-100 text-xs rounded overflow-auto">
-          {perfObserverLive}
-        </pre>
-      </section>
-
-      {/* 5) Stop watcher */}
-      <section className="space-y-2">
-        <h2 className="font-semibold">5) Stopper l’observation</h2>
-        <p className="text-sm text-gray-600">
-          Si tu veux arrêter le watcher live :
-        </p>
-        <pre className="p-4 bg-slate-900 text-slate-100 text-xs rounded overflow-auto">
-          {perfObserverStop}
-        </pre>
-      </section>
+      <CodeBlock
+        title="Watcher global (fetch/xhr/video/Hls.js)"
+        code={watcherAll}
+      />
+      <CodeBlock
+        title="Inspection rapide (balises <video> + Performance)"
+        code={quickVideoAndPerf}
+      />
+      <CodeBlock
+        title="Scan Performance (instantané) + copie 1ère .m3u8"
+        code={perfScanAndCopy}
+      />
+      <CodeBlock
+        title="Sniff .m3u8 (8s) — copie le meilleur lien"
+        code={sniff8s}
+      />
 
       <div className="text-xs text-gray-500">
-        Astuces : active “Preserve log” dans l’onglet Réseau, clique Play, et
-        rafraîchis si besoin. Si rien n’apparaît, c’est peut-être chargé via un
-        worker/DRM/anti-bot — dans ce cas, utilise les lecteurs officiels
-        (YouTube/Twitch…) ou une source HLS publique.
+        Astuce: beaucoup d’URLs .m3u8 sont signées et expirent. Re-scanne quand
+        ça 403.
       </div>
     </main>
   );
