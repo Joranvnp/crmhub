@@ -1,16 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-/** ————— Helpers “m3u8” ————— */
-function extractM3u8FromText(t: string): string | null {
-  if (!t) return null;
-  const re = /https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/gi;
-  const all = Array.from(t.matchAll(re)).map((m) => m[0]);
-  if (!all.length) return null;
+/* ================= Helpers ================= */
 
-  // score: playlist > master > chunk/index > https
+function pickBestByScore(list: string[]): string {
   const score = (u: string) => {
     let s = 0;
     if (/playlist\.m3u8/i.test(u)) s += 3;
@@ -19,17 +14,56 @@ function extractM3u8FromText(t: string): string | null {
     if (/^https?:\/\//i.test(u)) s += 1;
     return s;
   };
-  all.sort((a, b) => score(b) - score(a));
-  return all[0];
+  const arr = [...list];
+  arr.sort((a, b) => score(b) - score(a));
+  return arr[0];
+}
+
+function extractM3u8FromText(t: string): string | null {
+  if (!t) return null;
+
+  // 1) vrai .m3u8 dans le blob
+  const re = /https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/gi;
+  const exact = Array.from(t.matchAll(re)).map((m) => m[0]);
+  if (exact.length) return pickBestByScore(exact);
+
+  // 2) URLs sans extension mais master/playlist/index → ajouter .m3u8
+  const urlLike = /https?:\/\/[^\s"'<>]+/gi;
+  const urls = Array.from(t.matchAll(urlLike)).map((m) => m[0]);
+  const repaired: string[] = [];
+  for (let u of urls) {
+    u = u.replace(/[)"'<>]+$/g, "");
+    if (
+      !/\.m3u8(\?|#|$)/i.test(u) &&
+      /(master|playlist|index)(\?|#|$)/i.test(u)
+    ) {
+      repaired.push(u.replace(/(\?|#|$)/, ".m3u8$1"));
+    }
+  }
+  if (repaired.length) return pickBestByScore(repaired);
+
+  // 3) segments .ts → hypothèse playlist
+  const ts = Array.from(
+    t.matchAll(/https?:\/\/[^\s"'<>]+\/[^\s"'<>]+\.ts[^\s"'<>]*/gi)
+  ).map((m) => m[0]);
+  if (ts.length)
+    return ts[0].replace(/\/[^\/]*\.ts[^\s"'<>]*/, "/playlist.m3u8");
+
+  return null;
 }
 
 function deriveMasterOrPlaylist(u: string): string[] {
+  const addExtIfMissing = (s: string) =>
+    /\.m3u8(\?|#|$)/i.test(s) || !/(master|playlist|index)(\?|#|$)/i.test(s)
+      ? s
+      : s.replace(/(\?|#|$)/, ".m3u8$1");
+
   const s = new Set<string>([
-    u,
-    u.replace(/chunklist[^/]*\.m3u8/i, "playlist.m3u8"),
-    u.replace(/chunklist[^/]*\.m3u8/i, "master.m3u8"),
-    u.replace(/index[^/]*\.m3u8/i, "playlist.m3u8"),
-    u.replace(/index[^/]*\.m3u8/i, "master.m3u8"),
+    addExtIfMissing(u),
+    addExtIfMissing(u.replace(/chunklist[^/]*\.m3u8/i, "playlist.m3u8")),
+    addExtIfMissing(u.replace(/chunklist[^/]*\.m3u8/i, "master.m3u8")),
+    addExtIfMissing(u.replace(/index[^/]*\.m3u8/i, "playlist.m3u8")),
+    addExtIfMissing(u.replace(/index[^/]*\.m3u8/i, "master.m3u8")),
   ]);
   return [...s].filter((x) => /\.m3u8(\?|#|$)/i.test(x));
 }
@@ -38,61 +72,96 @@ function normalizeCandidate(raw: string): string | null {
   const trimmed = (raw || "").trim();
   if (!trimmed) return null;
 
-  // Si le presse-papiers contient des logs/du texte → extraire la première vraie .m3u8
   const fromBlob = extractM3u8FromText(trimmed);
-  const base = fromBlob || trimmed;
+  let ensured = fromBlob || trimmed;
 
-  if (!/\.m3u8(\?|#|$)/i.test(base)) return null; // on exige une .m3u8
+  // tolère URL sans extension si master/playlist/index → ajoute .m3u8
+  if (
+    !/\.m3u8(\?|#|$)/i.test(ensured) &&
+    /(master|playlist|index)(\?|#|$)/i.test(ensured)
+  ) {
+    ensured = ensured.replace(/(\?|#|$)/, ".m3u8$1");
+  }
+  if (!/\.m3u8(\?|#|$)/i.test(ensured)) return null;
 
-  // si c’est un chunk/index, on préfère générer une playlist/master voisine
-  const candidates = deriveMasterOrPlaylist(base);
-  // re-score comme plus haut
-  const score = (u: string) => {
-    let s = 0;
-    if (/playlist\.m3u8/i.test(u)) s += 3;
-    if (/master\.m3u8/i.test(u)) s += 2;
-    if (/chunklist|index\.m3u8/i.test(u)) s += 1;
-    if (/^https?:\/\//i.test(u)) s += 1;
-    return s;
-  };
-  candidates.sort((a, b) => score(b) - score(a));
-  return candidates[0] || base;
+  const candidates = deriveMasterOrPlaylist(ensured);
+  return pickBestByScore(candidates.length ? candidates : [ensured]);
 }
 
-/** Saisie manuelle d’un .m3u8 (UI inchangée) */
-function AttachM3U8Inline({ id, onDone }: { id: string; onDone: () => void }) {
+const isStrictM3u8 = (u?: string | null) => !!u && /\.m3u8(\?|#|$)/i.test(u);
+
+/* ============== Attach inline (AUTO SEULEMENT SI CLIPBOARD STRICT) ============== */
+
+function AttachM3U8Inline({
+  id,
+  onDone,
+  autoFromClipboard = false,
+  autoAttachIfValid = true,
+  requireStrictClipboard = true, // ⬅️ important: auto UNIQUEMENT si clipboard est déjà .m3u8 strict
+}: {
+  id: string;
+  onDone: () => void;
+  autoFromClipboard?: boolean;
+  autoAttachIfValid?: boolean;
+  requireStrictClipboard?: boolean;
+}) {
   const [pending, start] = useTransition();
   const [val, setVal] = useState("");
+  const router = useRouter();
+  const mountedRef = useRef(false);
 
-  async function run() {
-    let candidate = normalizeCandidate(val);
-    if (!candidate) {
-      alert("Je ne trouve pas de .m3u8 valable dans ce que tu as collé.");
-      return;
-    }
-
-    const r = await fetch("/api/modules/live/attach", {
+  async function doAttach(candidate: string) {
+    const res = await fetch("/api/modules/live/attach", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id, m3u8: candidate }),
     });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      alert("Erreur attach: " + (j?.error || r.status));
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert("Erreur attach: " + (j?.error || res.status));
       return;
     }
     onDone();
+    router.refresh();
+  }
+
+  async function run() {
+    const candidate = normalizeCandidate(val);
+    if (!candidate) {
+      alert("Je ne trouve pas de .m3u8 valable dans ce que tu as collé.");
+      return;
+    }
+    await doAttach(candidate);
   }
 
   async function pasteFromClipboard() {
     try {
-      const t = await navigator.clipboard.readText();
-      const fixed = normalizeCandidate(t) || t;
+      const raw = await navigator.clipboard.readText();
+      const fixed = normalizeCandidate(raw) || raw;
       setVal(fixed);
+
+      if (!autoAttachIfValid) return;
+
+      // Auto UNIQUEMENT si le clipboard BRUT est déjà un .m3u8 strict
+      if (requireStrictClipboard && !isStrictM3u8(raw)) return;
+
+      const cand = normalizeCandidate(raw); // on part du RAW, pas d'une réparation “trop” permissive
+      if (isStrictM3u8(cand)) {
+        start(() => doAttach(cand!));
+      }
     } catch {
-      // pas d’accès presse-papiers → ne rien casser
+      /* ignore */
     }
   }
+
+  // Ouverture modale → on tente la lecture clipboard (auto uniquement si strict)
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    if (autoFromClipboard) pasteFromClipboard();
+  }, [autoFromClipboard]);
+
+  // ❌ plus d’auto-attach “sur changement d’input” pour éviter les faux positifs
 
   return (
     <div className="flex items-center gap-2">
@@ -119,6 +188,8 @@ function AttachM3U8Inline({ id, onDone }: { id: string; onDone: () => void }) {
   );
 }
 
+/* ============== VerifyButton ============== */
+
 export default function VerifyButton({
   id,
   url,
@@ -137,9 +208,8 @@ export default function VerifyButton({
       ? `${location.origin}/api/modules/live/probe-collect`
       : "";
 
-  /** ——— Ton snippet/Bookmarklet/TM restent inchangés ici ——— */
+  // ton snippet/Bookmarklet si besoin
   const QUALITY_AUTOPROBE_SNIPPET = useMemo(() => {
-    // garde ta version actuelle ici (je n’y touche pas)
     return "";
   }, []);
 
@@ -161,6 +231,7 @@ export default function VerifyButton({
       } catch {
         j = { raw: text };
       }
+
       if (!r.ok) {
         alert(
           `Erreur check (${r.status}): ${
@@ -174,7 +245,7 @@ export default function VerifyButton({
       if (st === "online" && m3u8) {
         router.refresh();
       } else {
-        setOpen(true);
+        setOpen(true); // la modale s'ouvre ; l'attach auto ne se fait que si clipboard est .m3u8 strict
       }
     } catch (e: any) {
       alert("Network error: " + (e?.message || e));
@@ -273,18 +344,23 @@ export default function VerifyButton({
             </div>
 
             <div className="pt-3 border-t">
+              {/* Auto: lit le presse-papiers à l’ouverture, mais ATTACHE auto UNIQUEMENT si clipboard est .m3u8 strict */}
               <AttachM3U8Inline
                 id={id}
                 onDone={() => {
                   setOpen(false);
                   router.refresh();
                 }}
+                autoFromClipboard
+                autoAttachIfValid
+                requireStrictClipboard
               />
             </div>
 
             <p className="text-xs text-gray-500">
-              (Les navigateurs empêchent d’exécuter un script sur un autre site
-              sans action explicite.)
+              (L’accès au presse-papiers automatique nécessite souvent une
+              action utilisateur et un contexte HTTPS. Si ça ne marche pas,
+              clique “Coller”.)
             </p>
           </div>
         </div>
