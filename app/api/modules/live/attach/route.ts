@@ -22,8 +22,7 @@ function normalize(raw: string) {
   return str;
 }
 
-// Small healthcheck to debug 404s quickly:
-// go to http://localhost:3000/api/modules/live/attach in your browser.
+// GET pour vérifier que la route existe
 export async function GET() {
   return NextResponse.json({ ok: true, route: "/api/modules/live/attach" });
 }
@@ -34,9 +33,8 @@ export async function POST(req: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) {
+    if (!user)
       return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-    }
 
     let body: any;
     try {
@@ -64,25 +62,24 @@ export async function POST(req: Request) {
       );
     }
 
-    // Check ownership
+    // ⚠️ Ne sélectionner que les colonnes présentes dans ton schéma
     const { data: link, error: selErr } = await supabase
       .from("live_links")
-      .select("id,user_id,provider")
+      .select("id,user_id") // <= pas de provider ici
       .eq("id", id)
-      .eq("user_id", user.id)
+      .eq("user_id", user.id) // ownership
       .single();
 
     if (selErr || !link) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
 
+    // ⚠️ Ne mettre à jour que ce qui existe
     const patch = {
       last_m3u8: m3u8,
-      provider: link.provider || "raw_hls",
       status: "online" as const,
-      last_probe_at: new Date().toISOString(),
       last_checked_at: new Date().toISOString(),
-      last_error_code: null as string | null,
+      // notes: "attach via UI", // (optionnel) cette colonne existe chez toi
     };
 
     const { data: updated, error: upErr } = await supabase
