@@ -358,6 +358,38 @@ function PlayerActionsUniversal({
           ⏺️ Enregistrer ce flux (.m3u8)
         </button>
 
+        <button
+          onClick={async () => {
+            // récupère linkId depuis l’URL si tu l’y passes,
+            // sinon remplace par l’ID du link courant connu dans la page
+            const sp = new URLSearchParams(window.location.search);
+            const linkId = sp.get("linkId");
+            if (!linkId) {
+              alert(
+                "Pas de linkId dans l’URL. Ajoute ?linkId=<id> quand tu ouvres le player."
+              );
+              return;
+            }
+            const r = await fetch(
+              `/api/modules/live/record/stop-latest?linkId=${encodeURIComponent(
+                linkId
+              )}`,
+              { method: "POST" }
+            );
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) {
+              alert(
+                `Erreur stop (${r.status}): ${j?.detail || j?.error || "?"}`
+              );
+            } else {
+              alert("Arrêt demandé ✅ (le worker va finaliser & uploader)");
+            }
+          }}
+          className="px-3 py-1 rounded border text-sm"
+        >
+          Stop enregistrement
+        </button>
+
         {linkId ? (
           <>
             <button
