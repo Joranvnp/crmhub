@@ -5,6 +5,11 @@ import Hls from "hls.js";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
+/* 👇 AJOUT : composants UI enregistrement */
+import RecordNowButton from "../_components/RecordNowButton";
+import ToggleAutoRecord from "../_components/ToggleAutoRecord";
+import RecordingsList from "../_components/RecordingsList";
+
 function detectProvider(src: string) {
   const u = src.toLowerCase();
   if (
@@ -56,6 +61,8 @@ export default function LivePlayerPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const params = useSearchParams();
   const src = params.get("src") || "";
+  /* 👇 AJOUT : optionnel — si on vient d’un live_link */
+  const linkId = params.get("linkId") || "";
   const provider = useMemo(() => detectProvider(src), [src]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -231,10 +238,30 @@ export default function LivePlayerPage() {
           ← Retour
         </Link>
       </div>
+
       {content}
+
       <div className="text-xs text-gray-500 break-all">
         Source: <code>{src}</code>
       </div>
+
+      {/* 👇 AJOUT : barre d’actions enregistrement si on a linkId */}
+      {linkId && (
+        <div className="mt-4 border-t pt-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <RecordNowButton linkId={linkId} />
+            {/* Si tu veux l’état initial exact du toggle, ajoute une petite route GET /api/modules/live/link-info
+               et passe la valeur ici à la place de false. */}
+            <ToggleAutoRecord linkId={linkId} initial={false} />
+          </div>
+
+          <section className="space-y-2">
+            <h2 className="font-semibold">Enregistrements</h2>
+            <RecordingsList linkId={linkId} />
+          </section>
+        </div>
+      )}
+
       {provider === "hls" && (
         <div className="text-sm text-gray-600">
           Astuce: pour tes propres flux (S3/CloudFront), ouvre le CORS sur le

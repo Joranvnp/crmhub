@@ -2,6 +2,11 @@
 import Link from "next/link";
 import { createClient } from "@/libs/supabase/server";
 
+/* 👇 AJOUT : bouton bulk record */
+import StartAllOnlineButton from "../_components/StartAllOnlineButton";
+/* ton grid existant */
+import PlayersGrid from "./players_grid";
+
 export const dynamic = "force-dynamic";
 
 type Row = {
@@ -11,6 +16,8 @@ type Row = {
   last_m3u8: string | null;
   status: string | null;
   created_at: string | null;
+  /* 👇 AJOUT */
+  auto_record?: boolean | null;
 };
 
 export default async function PlayersPage() {
@@ -30,7 +37,7 @@ export default async function PlayersPage() {
 
   const { data, error } = await supabase
     .from("live_links")
-    .select("id,title,url,last_m3u8,status,created_at")
+    .select("id,title,url,last_m3u8,status,created_at,auto_record") // 👈 AJOUT
     .eq("user_id", user.id)
     .not("last_m3u8", "is", null)
     .order("created_at", { ascending: false });
@@ -39,11 +46,14 @@ export default async function PlayersPage() {
 
   return (
     <main className="max-w-[1400px] mx-auto p-6 space-y-4">
-      {/* ↩️ Flèche retour */}
+      {/* ↩️ Flèche retour + bouton bulk */}
       <div className="flex items-center justify-between">
         <Link href="/m/live" className="text-sm underline">
           ← Retour
         </Link>
+
+        {/* 👇 AJOUT : crée un job pour chaque lien online */}
+        <StartAllOnlineButton />
       </div>
 
       <div className="flex items-center justify-between">
@@ -66,11 +76,11 @@ export default async function PlayersPage() {
             pageUrl: r.url,
             m3u8: r.last_m3u8!,
             status: r.status || "unknown",
+            /* 👇 on transmet aussi l’auto si ton grid veut afficher un toggle */
+            auto: !!r.auto_record,
           }))}
         />
       )}
     </main>
   );
 }
-
-import PlayersGrid from "./players_grid";
