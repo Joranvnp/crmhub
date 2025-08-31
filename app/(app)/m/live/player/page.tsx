@@ -5,11 +5,6 @@ import Hls from "hls.js";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-/* 👇 AJOUT : composants UI enregistrement */
-import RecordNowButton from "../_components/RecordNowButton";
-import ToggleAutoRecord from "../_components/ToggleAutoRecord";
-import RecordingsList from "../_components/RecordingsList";
-
 function detectProvider(src: string) {
   const u = src.toLowerCase();
   if (
@@ -61,8 +56,7 @@ export default function LivePlayerPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const params = useSearchParams();
   const src = params.get("src") || "";
-  /* 👇 AJOUT : optionnel — si on vient d’un live_link */
-  const linkId = params.get("linkId") || "";
+  const linkId = params.get("linkId") || ""; // 👈 AJOUT: on lit linkId si présent
   const provider = useMemo(() => detectProvider(src), [src]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -238,29 +232,13 @@ export default function LivePlayerPage() {
           ← Retour
         </Link>
       </div>
-
       {content}
-
       <div className="text-xs text-gray-500 break-all">
         Source: <code>{src}</code>
       </div>
 
-      {/* 👇 AJOUT : barre d’actions enregistrement si on a linkId */}
-      {linkId && (
-        <div className="mt-4 border-t pt-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <RecordNowButton linkId={linkId} />
-            {/* Si tu veux l’état initial exact du toggle, ajoute une petite route GET /api/modules/live/link-info
-               et passe la valeur ici à la place de false. */}
-            <ToggleAutoRecord linkId={linkId} initial={false} />
-          </div>
-
-          <section className="space-y-2">
-            <h2 className="font-semibold">Enregistrements</h2>
-            <RecordingsList linkId={linkId} />
-          </section>
-        </div>
-      )}
+      {/* === AJOUT: barre d’actions universelle (avec ou sans linkId) === */}
+      <PlayerActionsUniversal m3u8={src} linkId={linkId || null} />
 
       {provider === "hls" && (
         <div className="text-sm text-gray-600">
@@ -271,5 +249,202 @@ export default function LivePlayerPage() {
         </div>
       )}
     </main>
+  );
+}
+
+/* ===== AJOUTS INLINE (helpers + UI) ===== */
+
+function fmtBytes(x?: number | null) {
+  if (!x || x <= 0) return "-";
+  const units = ["B", "KB", "MB", "GB"];
+  let n = x,
+    i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n.toFixed(1)} ${units[i]}`;
+}
+
+function PlayerActionsUniversal({
+  m3u8,
+  linkId,
+}: {
+  m3u8: string;
+  linkId: string | null;
+}) {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  async function startFromM3u8() {
+    if (!m3u8 || !/\.m3u8(\?|#|$)/i.test(m3u8)) {
+      alert("Le player n’a pas une URL .m3u8 valide.");
+      return;
+    }
+    setStarting(true);
+    try {
+      const r = await fetch("/api/modules/live/record/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          m3u8,
+          linkId: linkId || null,
+          maxSeconds: 3600,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        alert(
+          `Erreur start (${r.status}): ${j?.error || j?._raw || "unknown"}`
+        );
+        return;
+      }
+      alert("Job d’enregistrement créé ✅");
+      if (linkId) await load(); // rafraîchir la liste seulement si on a un lien
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function getSigned(path: string) {
+    const r = await fetch(
+      `/api/modules/live/record/signed?path=${encodeURIComponent(path)}`
+    );
+    const j = await r.json().catch(() => ({}));
+    if (j?.url) window.open(j.url, "_blank");
+    else alert("Impossible de générer le lien signé");
+  }
+
+  async function load() {
+    if (!linkId) return;
+    setLoading(true);
+    try {
+      const r = await fetch(
+        `/api/modules/live/record/list?linkId=${encodeURIComponent(linkId)}`,
+        { cache: "no-store" }
+      );
+      const j = await r.json();
+      setItems(Array.isArray(j?.items) ? j.items : []);
+    } catch (e: any) {
+      alert("Erreur chargement enregistrements: " + (e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function downloadLast() {
+    if (!linkId) return;
+    if (!items.length) await load();
+    const done = (items.length ? items : []).filter(
+      (x: any) => x.status === "completed" && x.file_path
+    );
+    if (!done.length) return alert("Aucun enregistrement terminé trouvé.");
+    await getSigned(done[0].file_path);
+  }
+
+  useEffect(() => {
+    if (linkId) load();
+  }, [linkId]);
+
+  return (
+    <div className="mt-4 border-t pt-4 space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          className="px-3 py-1 rounded bg-black text-white text-sm"
+          onClick={startFromM3u8}
+          disabled={starting}
+        >
+          ⏺️ Enregistrer ce flux (.m3u8)
+        </button>
+
+        {linkId ? (
+          <>
+            <button
+              className="px-3 py-1 rounded border text-sm"
+              onClick={downloadLast}
+            >
+              Télécharger le dernier
+            </button>
+            <button
+              className="px-3 py-1 rounded border text-sm"
+              onClick={load}
+              disabled={loading}
+            >
+              Rafraîchir la liste
+            </button>
+          </>
+        ) : (
+          <span className="text-xs text-gray-500">
+            (Ouvrez le player depuis un live pour voir la liste des
+            enregistrements)
+          </span>
+        )}
+      </div>
+
+      {linkId && (
+        <div className="w-full overflow-x-auto">
+          {loading ? (
+            <div className="text-sm text-gray-600">Chargement…</div>
+          ) : !items.length ? (
+            <div className="text-sm text-gray-600">
+              Aucun enregistrement pour l’instant.
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500">
+                  <th className="py-2 pr-4">Statut</th>
+                  <th className="py-2 pr-4">Créé</th>
+                  <th className="py-2 pr-4">Terminé</th>
+                  <th className="py-2 pr-4">Taille</th>
+                  <th className="py-2 pr-4">Télécharger</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it) => (
+                  <tr key={it.id} className="border-t">
+                    <td className="py-2 pr-4">
+                      {it.status === "completed"
+                        ? "✅"
+                        : it.status === "recording"
+                        ? "⏺️"
+                        : it.status === "queued"
+                        ? "⏳"
+                        : it.status === "error"
+                        ? "❌"
+                        : "–"}{" "}
+                      <span className="uppercase">{it.status}</span>
+                    </td>
+                    <td className="py-2 pr-4">
+                      {new Date(it.created_at).toLocaleString()}
+                    </td>
+                    <td className="py-2 pr-4">
+                      {it.ended_at
+                        ? new Date(it.ended_at).toLocaleString()
+                        : "-"}
+                    </td>
+                    <td className="py-2 pr-4">{fmtBytes(it.bytes)}</td>
+                    <td className="py-2 pr-4">
+                      {it.file_path ? (
+                        <button
+                          onClick={() => getSigned(it.file_path!)}
+                          className="px-2 py-1 rounded border"
+                          title={it.file_path || ""}
+                        >
+                          Télécharger (signé)
+                        </button>
+                      ) : (
+                        <span className="text-gray-500">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

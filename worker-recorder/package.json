@@ -1,9 +1,0 @@
-{
-  "name": "crmhub-recorder",
-  "type": "module",
-  "private": true,
-  "dependencies": {
-    "@supabase/supabase-js": "^2.44.0",
-    "execa": "^9.3.0"
-  }
-}

@@ -14,9 +14,7 @@ type RecordingItem = {
 
 async function fetchList(linkId: string): Promise<RecordingItem[]> {
   const r = await fetch(
-    `/api/modules/live/record/list-by-link?linkId=${encodeURIComponent(
-      linkId
-    )}`,
+    `/api/modules/live/record/list?linkId=${encodeURIComponent(linkId)}`,
     { cache: "no-store" }
   );
   const j = await r.json();
@@ -26,7 +24,7 @@ async function fetchList(linkId: string): Promise<RecordingItem[]> {
 
 async function getSigned(path: string) {
   const r = await fetch(
-    `/api/modules/live/record/signed-url?path=${encodeURIComponent(path)}`
+    `/api/modules/live/record/signed?path=${encodeURIComponent(path)}`
   );
   const j = await r.json();
   if (j?.url) window.open(j.url, "_blank");
