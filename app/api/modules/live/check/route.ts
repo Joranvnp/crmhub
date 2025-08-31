@@ -107,6 +107,7 @@ export async function POST(req: Request) {
     }
 
     const updated = Array.isArray(updData) ? updData[0] ?? null : updData;
+
     return NextResponse.json({ data: updated }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json(

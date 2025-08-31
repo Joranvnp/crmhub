@@ -1,3 +1,4 @@
+// app/userscript/crmhub-autoprobe.user.js/route.ts
 import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
@@ -6,12 +7,13 @@ export function GET(req: Request) {
   const base = `${url.protocol}//${url.host}`;
 
   const js = `// ==UserScript==
-// @name         CRMHub AutoProbe (10s, copy & close)
+// @name         CRMHub AutoProbe (10s, copy; safe-close)
 // @namespace    crmhub
-// @version      2.0.0
-// @description  Sniffe les .m3u8 pendant ~10s, choisit le meilleur, le copie, puis ferme l’onglet. Aucun POST/stockage.
+// @version      2.1.0
+// @description  Sniffe les .m3u8 ~10s, choisit le meilleur, le copie. Ne ferme JAMAIS si non armé. Ferme uniquement si autorisé.
 // @match        *://*/*
 // @run-at       document-idle
+// @noframes
 // @downloadURL  ${base}/userscript/crmhub-autoprobe.user.js
 // @updateURL    ${base}/userscript/crmhub-autoprobe.user.js
 // ==/UserScript==
@@ -19,9 +21,19 @@ export function GET(req: Request) {
 (function () {
   "use strict";
 
-  const AUTO_STOP_MS = 10000; // <<< durée d'analyse
+  const AUTO_STOP_MS = 10000; // durée d'analyse
 
-  // --- helpers de détection/parsing ---
+  // ---------- ARMING / SAFETY ----------
+  const hash = location.hash || "";
+  const ARMED = /(?:^|[&#])crmhub_autoprobe=1(?:$|&)/.test(hash) ||
+                (sessionStorage.getItem("__crmhub_armed") === "1");
+  if (!ARMED) {
+    // strictement inactif si non armé
+    return;
+  }
+  const CLOSE_ALLOWED = /(?:^|[&#])crmhub_close=1(?:$|&)/.test(hash) || !!window.opener;
+
+  // ---------- helpers détection ----------
   function looks(u){ return typeof u==="string" && /\\.m3u8(\\?|#|$)/i.test(u); }
   function deriveMasters(u){
     const s = new Set([u,
@@ -98,7 +110,19 @@ export function GET(req: Request) {
     try{ prompt("Copie ce lien :", text); }catch(e){}
     return false;
   }
-  function tryCloseTab(){
+  function toast(msg, ms=3000){
+    const d = document.createElement("div");
+    d.textContent = msg;
+    d.style.cssText = "position:fixed;top:12px;right:12px;background:#0b6;color:#fff;padding:10px 12px;border-radius:10px;font:13px system-ui;z-index:2147483647;box-shadow:0 6px 24px rgba(0,0,0,.25)";
+    document.body.appendChild(d);
+    setTimeout(()=> d.remove(), ms);
+  }
+  function tryCloseTabSafely(didCopy){
+    // ne tente la fermeture que si on a copié ET qu'on est autorisé à fermer
+    if (!didCopy || !CLOSE_ALLOWED) {
+      if (didCopy) toast("✅ Lien copié");
+      return;
+    }
     setTimeout(() => {
       let closed = false;
       try { window.close(); closed = true; } catch {}
@@ -106,16 +130,12 @@ export function GET(req: Request) {
         try { const w = window.open('', '_self'); w?.close(); closed = true; } catch {}
       }
       if (!closed) {
-        const d = document.createElement("div");
-        d.textContent = "✅ Lien copié. Ferme l’onglet manuellement (bloqué par le navigateur).";
-        d.style.cssText = "position:fixed;top:12px;left:12px;background:#0b6;color:#fff;padding:10px 12px;border-radius:10px;font:13px system-ui;z-index:2147483647;box-shadow:0 6px 24px rgba(0,0,0,.25)";
-        document.body.appendChild(d);
-        setTimeout(()=> d.remove(), 4000);
+        toast("✅ Lien copié. Ferme l’onglet manuellement (bloqué par le navigateur).", 4000);
       }
     }, 250);
   }
 
-  // --- collecte ---
+  // ---------- collecte ----------
   const seen = new Set();
   function add(u){
     try {
@@ -133,7 +153,6 @@ export function GET(req: Request) {
   const _open = XMLHttpRequest.prototype.open;
   try { XMLHttpRequest.prototype.open = function(m,u){ add(u); return _open.apply(this, arguments); }; } catch {}
 
-  // (optionnel) observer les ressources qui arrivent juste après le chargement
   let obs = null;
   if ("PerformanceObserver" in window) {
     try {
@@ -142,7 +161,7 @@ export function GET(req: Request) {
     } catch {}
   }
 
-  // --- compteur visuel minimal (discret) ---
+  // ---------- badge ----------
   const badge = document.createElement("div");
   badge.textContent = "Probe…";
   badge.style.cssText = "position:fixed;right:10px;bottom:10px;background:#111;color:#fff;padding:6px 8px;border-radius:10px;font:12px system-ui;opacity:.85;z-index:2147483647";
@@ -153,9 +172,9 @@ export function GET(req: Request) {
     badge.textContent = "Probe… " + s + "s — " + seen.size + " URL";
   }, 500);
 
-  // --- auto-stop + analyse + copie + close ---
+  // ---------- auto-stop + analyse + copy + safe-close ----------
   setTimeout(async ()=>{
-    // stop hooks/observer
+    // stop hooks
     try { window.fetch = _fetch; } catch {}
     try { XMLHttpRequest.prototype.open = _open; } catch {}
     try { obs && obs.disconnect && obs.disconnect(); } catch {}
@@ -164,7 +183,7 @@ export function GET(req: Request) {
     const list = Array.from(seen).sort((a,b)=> scoreUrl(b)-scoreUrl(a));
     if (!list.length){
       badge.textContent = "❓ Rien détecté";
-      tryCloseTab();
+      // NE PAS fermer si rien détecté
       return;
     }
 
@@ -176,15 +195,14 @@ export function GET(req: Request) {
     const best = pickBest(results);
     const bestUrl = best && best.url ? best.url : list[0];
 
-    // copie unique
-    await copyRobust(bestUrl);
+    const copied = await copyRobust(bestUrl);
+    badge.textContent = copied ? "✅ Lien copié" : "⚠️ Copie impossible";
 
-    // feedback très bref
-    badge.textContent = "✅ Copié, fermeture…";
-
-    // ferme l'onglet (si autorisé)
-    tryCloseTab();
+    tryCloseTabSafely(copied);
   }, AUTO_STOP_MS);
+
+  // bonus: si le bookmarklet t’a "armé" via sessionStorage, on peut le désarmer après usage
+  try { sessionStorage.removeItem("__crmhub_armed"); } catch {}
 })();
 `;
 
